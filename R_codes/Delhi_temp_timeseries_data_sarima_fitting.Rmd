@@ -1,5 +1,7 @@
 ---
 title: "Delhi temperature timeseries data SARIMA model fitting"
+author: "Kiran Lakhchaura"
+date: "2/3/2021"
 output:
   pdf_document: default
   html_document: default
@@ -7,7 +9,7 @@ output:
   fig_height: 4 
 ---
 
-Here we are doing a time-series analysis of the daily temperature in the city of Delhi for the period of Jan 01, 1995 to Dec 31, 2019.
+In this project I will be doing a time-series analysis of the daily temperature in the city of Delhi for the period of Jan 01, 1995 to Dec 31, 2019.
 
 ```{r include = FALSE}
 library(zoo)
@@ -19,19 +21,24 @@ library(forecast)
 library(tseries)
 ```
 
-**Reading the data**
+\
+**Reading the data**\
+
 
 ```{r}
-DelhiTemp <- read.csv(file = '../../../Data/Delhi_temperature_1995_2020.csv')
+DelhiTemp <- read.csv(file = '../Data/Delhi_temperature_1995_2020.csv')
 ```
 
-**Viewing the data**
+\
+**Viewing the data**\
+
 
 ```{r}
 head(DelhiTemp)
 ```
+\
+Creating a date column and a YearMon column from Month, Day and Year columns.\
 
-Creating a date column and a YearMon column from Month, Day and Year columns.
 
 ```{r}
 DelhiTemp$Date <- as.Date(with(DelhiTemp, paste(Year, Month, Day,sep="-")), "%Y-%m-%d")
@@ -39,18 +46,21 @@ DelhiTemp$YearMon <- as.yearmon(paste(DelhiTemp$Year, DelhiTemp$Month), "%Y %m")
 
 ```
 
-Temperature vs. Date plot
+\
+**Plotting the data**\
+Temperature vs. Date plot\
 
-```{r}
+```{r, fig.height=5, fig.width=15}
 Temp <- DelhiTemp$Temperature
 Date <- DelhiTemp$Date
 plot(Temp~Date)
 ```
+\
 Our data shows clear yearly seasonality and their are some very large outliers (temperature~-100) possibly because of missing data for those dates.
 
 ### Outlier detection and missing value treatment
 
-Identifying outliers and replacing them with backfilled values:
+Identifying outliers and replacing them with backfilled values:\
 
 ```{r}
 DelhiTemp$Temperature[DelhiTemp$Temperature < 0] <- NA
@@ -58,87 +68,114 @@ which(is.na(DelhiTemp$Temperature))
 DelhiTemp$Temperature <- na.locf(DelhiTemp$Temperature, fromLast = TRUE)
 which(is.na(DelhiTemp$Temperature))
 ```
+\
+**Updated Temperature vs. Date plot**\
 
-**Updated Temperature vs. Date plot**
-
-```{r}
+```{r,fig.height=5, fig.width=15}
 Temp <- DelhiTemp$Temperature
 Date <- DelhiTemp$Date
 plot(Temp~Date)
 ```
-
+\
 ### Binning
 
-Binning temperatures to their mean monthly values
+Binning temperatures to their mean monthly values\
 
 ```{r}
 DelhiMonthlyTemp <- DelhiTemp %>% group_by("YearMon"=DelhiTemp$YearMon) %>% summarize(Temperature = mean(Temperature))
 
 head(DelhiMonthlyTemp);
 ```
+\
+**Monthly mean temperature vs. Date (Month) plot**\
 
-**Monthly mean temperature vs. Date (Month) plot**
-
-```{r}
+```{r, fig.height=5, fig.width=15}
 Temp <- DelhiMonthlyTemp$Temperature
 Date <- DelhiMonthlyTemp$YearMon
 plot(Temp~Date,type="l")
 ```
-
+\
 Once again we see that the data shows clear seasonality but no variation in variance so differencing should be enough for taking care of the trend.
 
-### ACF and PACF plots
+### Stationarity tests
 
-Let's first look at the auto-correlation function and the partial auto-correlation function plots.
+Checking for stationarity using ADF test\
 
 ```{r}
-Temp <- DelhiMonthlyTemp$Temperature
-
-par(mfrow=c(2,1))
-acf(Temp,main="Auto-Correlation Function of Delhi's mean monthly temperatures")
-pacf(Temp,main="Partial Auto-Correlation Function of Delhi's mean monthly temperatures");
+adf.test(Temp)
 ```
+\
+ADF test p-value (<0.05) suggests that the null-hypothesis of unit-root (non-statinarity) should be rejected => data is stationary.
 
+Checking for trend stationarity using KPSS test\
+
+```{r}
+kpss.test(Temp, null=c("Trend"), lshort=TRUE)
+```
+\
+KPSS p-value (>0.05) indicates that the null hypothesis of trend stationarity cannot be rejected.
+
+Let's do the PP unit-root test now\
+
+```{r}
+pp.test(Temp,lshort = TRUE)
+```
+\
+The PP unit root test p-value (<0.05) indicates that the null hypothesis of unit-root (non-stationarity) should be rejected => data is stationary.
+
+So all three tests indicate that the data is stationary.
+
+Now let's look at the auto-correlations in the ACF and PACF plots.
+
+### Auto-Correlation Functions
+
+Let's first look at the auto-correlation function and the partial auto-correlation function plots.\
+
+```{r, fig.height=5, fig.width=15}
+par(mfrow=c(2,1))
+acf(Temp,main="Auto-Correlation Function of Delhi's mean monthly temperatures",50)
+pacf(Temp,main="Partial Auto-Correlation Function of Delhi's mean monthly temperatures",50);
+```
+\
 We see that the ACF plot also shows lots of correlation and clear seasonality.
 
 ## Guessing the right orders for (S)ARIMA model fitting
 
-1. Differncing orders (d, D)
+### 1. Differncing orders (d, D)
 
-Non-seasonal differencing -> *diff(data)*
-Seasonal differencing -> *diff(data,12)*
-Together -> *diff(diff(data),12)*
+Since we do see clear seasonality and trend in the data, we should look at the differenced data using both seasonal as well as non-seasonal differencing -> *diff(diff(data),12)*\
 
-```{r}
-plot(diff(diff(Temp),12),type="l")
+```{r, fig.height=5, fig.width=15}
+plot(diff(diff(Temp),12),type="l",main="differenced data -> diff(diff(data),12)")
 ```
-
-the plot shows almost no-trends except for a few large peaks at the center which may be outliers => d=1, D=1. We can also use the ADF test for checking the stationarity
+\
+the plot shows almost no-trends except for a few large peaks at the center which may be outliers => d=1, D=1. We can also use the ADF test for checking the stationarity\
 
 ```{r}
 diff_data <- diff(diff(Temp),12)
 adf.test(diff_data)
 ```
-
+\
 The test confirms that the differenced data is stationary.
 
-2. orders for the auro-regressive (AR) and Moving Average (MA) terms i.e. p and q
+### 2. Finding the best orders for the auro-regressive (AR; p, P) and Moving Average (MA; q, Q) terms
 
-**ACF and PACF for differenced data**
+**ACF and PACF for differenced data**\
 
-```{r}
+```{r, fig.height=5, fig.width=15}
 par(mfrow=c(2,1))
-acf(diff(diff(Temp),12),main='differnced data ACF',50)
-pacf(diff(diff(Temp),12),main='differnced data PACF',50);
+acf(diff_data,main='differnced data ACF',50)
+pacf(diff_data,main='differnced data PACF',50);
 ```
-
+\
 The ACF plot shows significant correlations at lag=1,11 and 12 while the PACF shows significant correlation for lag=1,11 and 12 The correlations at later parts may be due to seasonality
 
 ### Finding best parameters using
+
 1. Grid Search
 
 Trying for different values of p,q,P,Q and note down AIC, SSE and p-value (for Ljun-box-test). 
-We want high p-values and small AIC and SSE using parsimony principle (simpler the better) while searching
+We want high p-values and small AIC and SSE using parsimony principle (simpler the better) while searching\
 
 ```{r}
 d=1; DD=1; per=12
@@ -163,8 +200,8 @@ for(p in 1:2){
   }
 }
 ```
-
-2. Using auto.arima()
+\
+2. auto.arima()\
 
 ```{r}
 y <- msts(Temp, seasonal.periods=c(12))
@@ -172,44 +209,47 @@ auto.arima( y, d = 1, D = 1,  max.p = 5,  max.q = 5,  max.P = 5,  max.Q = 5, max
 ```
 
 
-
-### Best-model
+## Best-model
 
 For some reason auto-arima is unable to reproduce the minimum value of AIC which was found in the grid-search method. From the grid-search the lowest AIC of 1221.998 is found for a 1,1,1,0,1,1,12 SARIMA model which also has a large enough p-value.
 
-### Train-test split
+
+## Fitting the best-model on the data
+
+### Train-test split\
 
 ```{r}
 N = length(Temp)
-n = 0.7*N
+n = round(0.7*N)
 train = Temp[1:n]
 test  = Temp[(n+1):N]
 ```
 
-### SARIMA(1,1,1,0,1,1,12) fitting results
+### Training the model with the train set\
 
-```{r}
+```{r, fig.height=5, fig.width=15}
 model<-arima(x=train, order = c(1,1,1), seasonal = list(order=c(0,1,1), period=per))
 standard_residuals<- model$residuals/sd(model$residuals)
 plot(standard_residuals,ylab='',main='Standardized Residuals')
 ```
-We see that the residuals look almost stationary which we also confirmed with the ADF test
+\
+We see that the residuals look almost stationary which we also confirmed with the ADF test\
 
 ```{r}
 print(adf.test(standard_residuals))
 ```
+\
+Let's check for correlations in the residual using the ACF plot\
 
-Let's check for correlations in the residual using the ACF plot
-
-```{r}
+```{r, fig.height=5, fig.width=15}
 acf(standard_residuals,50,main='ACF of standardized residuals');
 ```
-
+\
 Next, we will perform a Ljung-Box test on the residuals. The null hypotheis for the test is:\
 H0: The dataset points are independently distributed (not correlated).\
-where a p-value of greater than 0.05 will be insifficient to reject the null hypothesis.
+where a p-value of greater than 0.05 will be insifficient to reject the null hypothesis.\
 
-```{r}
+```{r, fig.height=5, fig.width=15}
 for (lag in seq(1:50)){
   pval<-Box.test(model$residuals, lag=lag)
   p[lag]=pval$p.value
@@ -217,22 +257,33 @@ for (lag in seq(1:50)){
 plot(p,ylim = (0.0:1), main='p-value from Ljung-Box test')
 abline(h=0.05,lty=2)
 ```
+\
+Any value above the dashed line (at y=0.05) is significant. We see that the p-values of the Ljung-Box test at all the lags are very significant and therefore the hypothesis that the residuals are not correlated cannot be rejected.
 
-Any value above the dashed line (at y=0.05) is significant. We see that the p-values of the Ljung-Box test at all the lags are significant and therefore the hypothesis that the residuals are not correlated cannot be rejected.
+### Testing the predictions on the test set\
 
-```{r}
+```{r, fig.height=5, fig.width=15}
 model<-arima(x=train, order = c(1,1,1), seasonal = list(order=c(0,1,1), period=per))
 pred_len=length(test)
 plot(forecast(model, h=pred_len),main='Testing predictions')
 train_x = seq(length(train)+1,length(train)+length(test))
 lines(train_x,test)
 ```
-
+\
 Here the black lines in the first part (left) shows the training data and those in the second part shows the test data which alos has blue lines overlaid on it showing the predictions from our model which seem to match the test data pretty well. The small shaded region on the blue lines shows the confidence interval (difficult to resolve here but it actually consists of two different dark and light shaded regions showing the 80% and 95% confidence regions).
 
-### Forecasting using the best-model
+## Evaluating predictions\
 
 ```{r}
+df2 <- forecast(model,h=pred_len)
+df2 <- data.frame(df2)
+print(paste0('Root Mean Squared Error in predictions =', round(sqrt(mean((test-df2[,1])**2))/mean(test)*100,2), '%'))
+```
+
+
+## Forecasting using the best-model\
+
+```{r, fig.height=5, fig.width=15}
 model<-arima(x=Temp, order = c(1,1,1), seasonal = list(order=c(0,1,1), period=per))
 par(mfrow=c(1,1))
 h=12 # forecasting for the 12 months after the end of the dataset
